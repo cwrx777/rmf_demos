@@ -29,12 +29,13 @@ class RobotAPI:
     # The constructor below accepts parameters typically required to submit
     # http requests. Users should modify the constructor as per the
     # requirements of their robot's API
-    def __init__(self, prefix: str, user: str, password: str):
+    def __init__(self, prefix: str, user: str, password: str, node):
         self.prefix = prefix
         self.user = user
         self.password = password
         self.timeout = 5.0
-        self.debug = False
+        self.debug = True
+        self.node = node
 
     def check_connection(self):
         ''' Return True if connection to the robot API server is successful'''
@@ -54,8 +55,10 @@ class RobotAPI:
             response = requests.get(url, self.timeout)
             response.raise_for_status()
             data = response.json()
-            if self.debug:
-                print(f'Response: {data}')
+            
+            # if self.debug:
+            #     self.node.get_logger().debug(f'Response: {data}')
+
             if not data['success']:
                 return None
             x = data['data']['position']['x']
@@ -63,9 +66,9 @@ class RobotAPI:
             angle = data['data']['position']['yaw']
             return [x, y, angle]
         except HTTPError as http_err:
-            print(f'HTTP error: {http_err}')
+            self.node.get_logger().error(f'HTTP error: {http_err}')
         except Exception as err:
-            print(f'Other error: {err}')
+            self.node.get_logger().error(f'Other error: {err}')
         return None
 
     def navigate(self,
@@ -88,12 +91,12 @@ class RobotAPI:
             response = requests.post(url, timeout=self.timeout, json=data)
             response.raise_for_status()
             if self.debug:
-                print(f'Response: {response.json()}')
+                self.node.get_logger().debug(f'Response: {response.json()}')
             return response.json()['success']
         except HTTPError as http_err:
-            print(f'HTTP error: {http_err}')
+            self.node.get_logger().error(f'HTTP error: {http_err}')
         except Exception as err:
-            print(f'Other error: {err}')
+            self.node.get_logger().error(f'Other error: {err}')
         return False
 
     def start_process(self,
@@ -112,12 +115,12 @@ class RobotAPI:
             response = requests.post(url, timeout=self.timeout, json=data)
             response.raise_for_status()
             if self.debug:
-                print(f'Response: {response.json()}')
+                self.node.get_logger().info(f'Response: {response.json()}')
             return response.json()['success']
         except HTTPError as http_err:
-            print(f'HTTP error: {http_err}')
+            self.node.get_logger().error(f'HTTP error: {http_err}')
         except Exception as err:
-            print(f'Other error: {err}')
+            self.node.get_logger().error(f'Other error: {err}')
         return False
 
     def stop(self, robot_name: str):
@@ -129,12 +132,12 @@ class RobotAPI:
             response = requests.get(url, self.timeout)
             response.raise_for_status()
             if self.debug:
-                print(f'Response: {response.json()}')
+                self.node.get_logger().debug(f'Response: {response.json()}')
             return response.json()['success']
         except HTTPError as http_err:
-            print(f'HTTP error: {http_err}')
+            self.node.get_logger().error(f'HTTP error: {http_err}')
         except Exception as err:
-            print(f'Other error: {err}')
+            self.node.get_logger().error(f'Other error: {err}')
         return False
 
     def navigation_remaining_duration(self, robot_name: str):
@@ -178,11 +181,13 @@ class RobotAPI:
         try:
             response = requests.get(url, timeout=self.timeout)
             response.raise_for_status()
-            if self.debug:
-                print(f'Response: {response.json()}')
+            
+            # if self.debug:
+            #     self.node.get_logger().debug(f'Response: {response.json()}')
+
             return response.json()
         except HTTPError as http_err:
-            print(f'HTTP error: {http_err}')
+            self.node.get_logger().error(f'HTTP error: {http_err}')
         except Exception as err:
-            print(f'Other error: {err}')
+            self.node.get_logger().error(f'Other error: {err}')
         return None

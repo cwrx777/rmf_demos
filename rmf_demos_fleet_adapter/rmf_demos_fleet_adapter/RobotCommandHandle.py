@@ -28,6 +28,10 @@ import rmf_adapter.schedule as schedule
 
 from rmf_fleet_msgs.msg import DockSummary, ModeRequest
 
+from std_msgs.msg import String
+from rmf_traffic_msgs.srv import RegisterParticipant
+from rmf_traffic_msgs.msg import ParticipantDescription, Profile, ConvexShape, ConvexShapeContext, Circle
+
 import numpy as np
 
 import threading
@@ -159,16 +163,74 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
             self.mode_request_cb,
             qos_profile=qos_profile_system_default)
 
+        #CW
+        self.register_participant_srv_client = self.node.create_client(
+            srv_type = RegisterParticipant, 
+            srv_name = 'rmf_traffic/register_participant')
+
+        self.node.create_subscription(
+            String, 
+            'test_topic', 
+            self.test_topic_cb, 
+            qos_profile=qos_profile_system_default)
+        
+
         self.update_thread = threading.Thread(target=self.update)
         self.update_thread.start()
 
         self.initialized = True
 
+    def test_topic_cb(self, msg):
+        self.register_participant(1.0, 1.5)
+        pass
+
+    #CW
+    def register_participant(self, footprint:float, vicinity:float):
+        req = RegisterParticipant.Request()
+        description = ParticipantDescription()
+        description.name = self.name
+        description.owner = self.fleet_name
+        description.responsiveness = ParticipantDescription.RX_RESPONSIVE
+        description.profile = Profile()
+        description.profile.footprint = ConvexShape(type = ConvexShape.CIRCLE, index = 0)
+        description.profile.vicinity = ConvexShape(type = ConvexShape.CIRCLE, index = 1)
+        description.profile.shape_context.circles = [Circle (radius = footprint), Circle (radius = vicinity)]
+
+        req.description = description
+        executor = None # MultiThreadedExecutor()
+        try:
+            future = self.register_participant_srv_client.call_async(req)
+            rclpy.spin_until_future_complete(self.node, future, executor = executor, timeout_sec = 1.0)
+            response = future.result()
+            if response is None:
+                self.node.get_logger().warn('/rmf_traffic/register_participant_srv call failed')
+            else:
+                self.node.get_logger().info(str(response))
+                return True
+
+        except Exception as e:
+            traceback.print_exc()
+            self.node.get_logger().error(
+                'Error! RegisterParticipant Srv failed %r' % (e,))
+        
+        
+        return False
+
     def sleep_for(self, seconds):
-        goal_time =\
-          self.node.get_clock().now() + Duration(nanoseconds=1e9*seconds)
-        while (self.node.get_clock().now() <= goal_time):
-            time.sleep(0.001)
+        # goal_time = self.node.get_clock().now() + Duration(nanoseconds=1e9*seconds)
+        # while (self.node.get_clock().now() <= goal_time):
+        #     time.sleep(0.001)
+
+
+        now = self.node.get_clock().now()
+        goal_time = now + Duration(nanoseconds=1e9*seconds)
+        while (now <= goal_time):
+            #time.sleep(0.001)
+            time.sleep(0.1)
+            now = self.node.get_clock().now()
+            self.node.get_logger().info(f'now = {now}')
+        
+            
 
     def clear(self):
         with self._lock:
@@ -200,12 +262,19 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
 
         self.node.get_logger().info(f"Received new path for {self.name}")
 
+        
+
         wait, entries = self.filter_waypoints(waypoints)
         self.remaining_waypoints = copy.copy(entries)
         assert next_arrival_estimator is not None
         assert path_finished_callback is not None
         self.next_arrival_estimator = next_arrival_estimator
         self.path_finished_callback = path_finished_callback
+
+
+        # for waypoint in self.remaining_waypoints:
+        #     self.node.get_logger().info(f'wp[{waypoint.index}]:{self.print_PlanWaypoint(waypoint)}')
+        #     pass
 
         # Make the robot wait at its current position
         if (wait is not None):
@@ -235,6 +304,9 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
                     # Assign the next waypoint
                     self.target_waypoint = self.remaining_waypoints[0]
                     self.path_index = self.remaining_waypoints[0].index
+
+                    self.node.get_logger().info(f"Robot [{self.name}] moving to wp[{self.path_index}]")
+
                     # Move robot to next waypoint
                     target_pose = self.target_waypoint.position
                     [x, y] = target_pose[:2]
@@ -286,6 +358,19 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
                                     self.target_waypoint.graph_index
                                 self.last_known_waypoint_index = \
                                     self.on_waypoint
+
+
+                                # check if there is change on the map
+                                #CW - map switch logic
+                                current_waypoint = self.graph.get_waypoint(self.target_waypoint.graph_index)
+                                target_map_name = current_waypoint.map_name
+
+                                if(self.map_name != target_map_name):
+                                    self.node.get_logger().info(
+                                        f"Robot [{self.robot_name}] switching from {self.map_name} to {target_map_name}")
+
+
+
                             else:
                                 self.on_waypoint = None  # still on a lane
                         else:
@@ -364,8 +449,8 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
                     self.name, self.dock_name, self.map_name)):
                 self.node.get_logger().info(
                     f"Requesting robot {self.name} "
-                    "to dock at {self.dock_name}")
-                time.sleep_for(1.0)
+                    f"to dock at {self.dock_name}")
+                self.sleep_for(1.0)
 
             with self._lock:
                 self.on_waypoint = None
@@ -617,3 +702,67 @@ class RobotCommandHandle(adpt.RobotCommandHandle):
             return
         if msg.mode.mode == RobotState.IDLE:
             self.complete_robot_action()
+
+    def print_lane(self, lane) ->str :
+        if(lane is None):
+            return
+
+        forward_lane = self.graph.get_lane(lane)
+        entry_index = forward_lane.entry.waypoint_index
+        exit_index = forward_lane.exit.waypoint_index
+        reverse_lane = self.graph.lane_from(exit_index, entry_index)
+
+        entry_node = self.graph.get_waypoint(entry_index)
+        exit_node = self.graph.get_waypoint(exit_index)
+
+        return f'lane from [{entry_node.waypoint_name}] to [{exit_node.waypoint_name}]'
+
+    def print_PlanWaypoint(self, waypoint:PlanWaypoint) ->str:
+        graph_index = waypoint.graph_index
+
+        graph_waypoint = self.graph.get_waypoint(graph_index)
+        return f'[{graph_waypoint.waypoint_name}]-L[{graph_waypoint.map_name}]-P[{waypoint.position[0]:.2f},{waypoint.position[1]:.2f},{waypoint.position[2]:.2f}]'# -event={type(waypoint.event)}'
+
+        
+
+    def print_plan_waypoint(self, waypoint) -> str:
+
+        # Plan::Waypoint:
+        # position Eigen::Vector3d& 
+        # time rmf_traffic::Time 
+        # graph_index std::optional<std::size_t> 
+        # approach_lanes std::vector<std::size_t>&
+        # progress_checkpoints std::vector<Progress>& 
+        # arrival_checkpoints Checkpoints& 
+        # event Graph::Lane::Event*
+        # dependencies Dependencies
+
+        if(waypoint is None):
+            return ""
+        #self.node.get_logger().info(f'waypoint.graph_index[{waypoint.graph_index}] - {type(waypoint.graph_index)}')
+        if(waypoint.graph_index is None):
+            return f'[no_name]-pos=[{waypoint.position[0]:.3f},{waypoint.position[1]:.3f},{waypoint.position[2]:.3f}]-event={type(waypoint.event)}'
+            
+        graph_waypoint = self.graph.get_waypoint(waypoint.graph_index)
+        return f'[{graph_waypoint.waypoint_name}]-level={graph_waypoint.map_name}-pos=[{waypoint.position[0]:.3f},{waypoint.position[1]:.3f},{waypoint.position[2]:.3f}]-event={type(waypoint.event)}'
+
+        # self.node.get_logger().info(f"position  = [{waypoint.position}]")
+        # self.node.get_logger().info(f"time  = [{waypoint.time}]")
+        # self.node.get_logger().info(f"graph_index = [{waypoint.graph_index}]")
+        # self.node.get_logger().info(f"approach_lanes = [{waypoint.approach_lanes}]")
+
+        # if(waypoint.event):
+        #     self.node.get_log:ger().info(f"lane event = [{type(waypoint.event)}]")
+
+        # attribute progress_checkpoints not available 
+        # self.node.get_logger().info(f"waypoint progress_checkpoints [{index}] = [{waypoint.progress_checkpoints}]")
+        # self.node.get_logger().info(f"waypoint progress_checkpoints() [{index}] = [{waypoint.progress_checkpoints()}]")
+
+        # attribute arrival_checkpoints not available 
+        # self.node.get_logger().info(f"waypoint arrival_checkpoints [{index}] = [{waypoint.arrival_checkpoints}]")
+        # self.node.get_logger().info(f"waypoint arrival_checkpoints() [{index}] = [{waypoint.arrival_checkpoints()}]")
+        
+        # attribute dependencies not available
+        # self.node.get_logger().info(f"waypoint dependencies [{index}] = [{waypoint.dependencies}]")
+
+        return ""

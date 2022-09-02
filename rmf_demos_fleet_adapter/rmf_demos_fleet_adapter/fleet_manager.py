@@ -262,6 +262,9 @@ class FleetManager(Node):
                   response_model=Response)
         async def start_process(robot_name: str, task: Request):
             data = {'success': False, 'msg': ''}
+
+            self.get_logger().info(f"{robot_name} start_process {task}")
+
             if (robot_name not in self.robots or
                     len(task.task) < 1 or
                     task.task not in self.docks):
@@ -275,8 +278,21 @@ class FleetManager(Node):
             cur_yaw = cur_loc.yaw
             previous_wp = [cur_x, cur_y, cur_yaw]
             target_loc = Location()
+
+            self.get_logger().info(f"{robot_name} start_process info {self.docks[task.task]}")
+            
+
             for wp in self.docks[task.task]:
+
+                #CW
+                # t = self.get_clock().now().to_msg() 
+                # t.sec = t.sec + 5
+                # wp.t = t
+
                 target_loc = wp
+                
+                self.get_logger().info(f"{robot_name} moving to {wp}")
+
                 path_request.path.append(target_loc)
                 previous_wp = [wp.x, wp.y, wp.yaw]
 
@@ -304,6 +320,7 @@ class FleetManager(Node):
                 self.robots[msg.name].destination = None
 
     def dock_summary_cb(self, msg):
+        self.get_logger().info(f"dock_summary_cb {msg}")
         for fleet in msg.docks:
             if(fleet.fleet_name == self.fleet_name):
                 for dock in fleet.params:

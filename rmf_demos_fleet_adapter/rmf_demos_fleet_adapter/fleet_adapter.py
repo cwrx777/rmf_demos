@@ -88,13 +88,31 @@ def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time):
 
     nav_graph = graph.parse_graph(nav_graph_path, vehicle_traits)
 
+    node.get_logger().info(f'nav_graph num_waypoints [{nav_graph.num_waypoints}]')
+    for i in range(nav_graph.num_waypoints):
+        waypoint = nav_graph.get_waypoint(i)
+        
+        node.get_logger().info(f'waypoint[{i}]:'
+                                f'[{waypoint.waypoint_name}]'
+                                f'-Level[{waypoint.map_name}]'
+                                f'-[{waypoint.location[0]:.3f},{waypoint.location[1]:.3f}]'
+                                f'-charger?[{waypoint.charger}]'
+                                f'-Hold?[{waypoint.holding_point}]'
+                                f'-park?[{waypoint.parking_spot}]'
+                                f'-pass?[{waypoint.passthrough_point}]')
+
+
+
     # Adapter
     fleet_name = fleet_config['name']
     adapter = adpt.Adapter.make(f'{fleet_name}_fleet_adapter')
-    if use_sim_time:
-        adapter.node.use_sim_time()
+    
     assert adapter, ("Unable to initialize fleet adapter. Please ensure "
                      "RMF Schedule Node is running")
+
+    if use_sim_time:
+        adapter.node.use_sim_time()
+        
     adapter.start()
     time.sleep(1.0)
 
@@ -168,6 +186,7 @@ def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time):
                              description: dict,
                              execution:
                              adpt.robot_update_handle.ActionExecution):
+
             with cmd_handle._lock:
                 if len(description) > 0 and\
                         description in cmd_handle.graph.keys:
@@ -176,11 +195,17 @@ def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time):
                 else:
                     cmd_handle.action_waypoint_index = \
                         cmd_handle.last_known_waypoint_index
+
+                node.get_logger().info(f"_action_executor: {category} {description} {execution}")
+
                 cmd_handle.on_waypoint = None
                 cmd_handle.on_lane = None
                 cmd_handle.action_execution = execution
+
+
         # Set the action_executioner for the robot
         cmd_handle.update_handle.set_action_executor(_action_executor)
+
         if ("max_delay" in cmd_handle.config.keys()):
             max_delay = cmd_handle.config["max_delay"]
             cmd_handle.node.get_logger().info(
@@ -201,7 +226,8 @@ def initialize_fleet(config_yaml, nav_graph_path, node, use_sim_time):
     api = RobotAPI(
         prefix,
         fleet_config['fleet_manager']['user'],
-        fleet_config['fleet_manager']['password'])
+        fleet_config['fleet_manager']['password'],
+        node)
 
     # Initialize robots for this fleet
     robots = {}
